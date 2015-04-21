@@ -1,0 +1,71 @@
+%Testdatensatz um shertest mit definitv ergebnisbehafteten Daten zu füttern
+function [timedata,posdata,defdata,grenze] = CreateData(datalength,ppms,startfreq,freqinc,endfreq,nuldur,fdur)
+%freqinc)
+%Position:
+%1s linearer anstieg von -8*10^-6 bis -5*10^-6 + 2s nullinie bei -5*10^-6 + 10 0.1s intervalle mit
+%ansteigender Frequenz sinusförmig mit amp 2*10^-8 + 1s linearer abfall von -8*10^-6 auf -5*10^-6
+%Deflection:
+%1s nulllinie + 2s nulllinie bei 2*10^-8 + 10 0.1s intervall mit ansteigender Frequenz sinusförmig(45° verschoben) amp
+%2*10^-8 + 1s nullinie
+%clear all
+%close all
+%clc
+%ppms = 50;
+%startfreq=100;
+%freqinc=100;
+%endfreq=2000;
+%nuldur=0.1;
+%fdur=0.1;
+%datalength=301785;
+%% Position            
+    %Nulllinie
+    posdata2=ones(1,nuldur*1000*ppms)*-4*10^-6;
+    %Frequenzen   
+    d=-4*10^-6;
+    a=2*10^-8;
+    freqvec=[startfreq:freqinc:endfreq];
+    kreisfreqvec=freqvec.*2*pi;
+    %Runden der kreisfrequenz sonst passieren schlimme dinge
+    kreisfreqvec= round(kreisfreqvec*100)/100;
+    numFreq=numel(freqvec);
+    i=1;
+    for i=1:numFreq
+        b=kreisfreqvec(i);
+        posdata3(1+(i-1)*fdur*1000*ppms:i*fdur*1000*ppms)=a*sin(b*(0.0001:0.0001:0.5))+d;   
+    end
+    restlength=datalength-length(posdata2)-length(posdata3);
+    posinterv1=1:round(1/2*restlength);
+    posinterv4=posinterv1;
+    while restlength-length(posinterv1)-length(posinterv4) >0
+        posinterv4=[posinterv4,max(posinterv4+1)];
+    end
+    while restlength-length(posinterv1)-length(posinterv4) <0
+        posinterv4=posinterv4(1:end-1);
+    end
+    %Erste Steigung
+    pos1fit=polyfit([1, length(posinterv1)],[-12*10^-6,-4*10^-6],1);
+    funkpospart1= @(x) pos1fit(1)*x + pos1fit(2);
+    posdata1=funkpospart1(posinterv1);
+    %Zweite Steigung
+    pos4fit=polyfit([1, length(posinterv4)],[-4*10^-6,-12*10^-6],1);
+    funkpospart4= @(x) pos4fit(1)*x + pos4fit(2);    
+    posdata4=funkpospart4(posinterv4);
+
+    posdata=[posdata1,posdata2,posdata3,posdata4]; 
+%% Deflection
+
+defdata2=ones(1,length(posdata2))*2*10^-8;
+a=5*10^-9;
+d=2*10^-8;
+for i=1:numFreq
+        b=kreisfreqvec(i);
+        defdata3(1+(i-1)*100*ppms:i*100*ppms)=a*sin(b*(0.0001:0.0001:0.5)+i*(1/50*pi))+d;
+end
+
+defdata1=zeros(1,length(posdata1));
+defdata4=zeros(1,length(posdata4));
+defdata=[defdata1,defdata2,defdata3,defdata4]; 
+%% Time
+timedata=[1/(ppms*1000):1/(ppms*1000):length(posdata)/(ppms*1000)];
+grenze(1)=length(posinterv1);
+ 
