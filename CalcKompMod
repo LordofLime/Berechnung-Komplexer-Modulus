@@ -1,0 +1,664 @@
+%function [Ft,Fd,Fp] = Shertest(startIdx,stopIdx,startLineIdx,stopLineIdx,startMapIdx,stopMapIdx, startfreq, endfreq, freqinc)
+clear all
+close all
+clc
+direct = cd;
+tic
+try         
+    %filenameText='Line0000Point';%Dateiname ohne Index und Erweiterung
+    startIdx=0;%Erster Point-Index
+    stopIdx=19; %Letzter Point-Index
+    startLineIdx=0;%Erster Line-Index
+    stopLineIdx=19;%Letzter Line-Index
+    startMapIdx=1;%Erster Map-Index
+    stopMapIdx=1;%Letzter Map-Index
+    extension='.ibw';           
+    Emod=[];
+    loss=Emod;
+    Gsternall=Emod; 
+    b0=0;
+    pointcounter=1;
+    %currEvent=0;
+
+    position = [];
+    deflection = [];
+    springconstant = 0;    
+    %filename='ForceClamp0192.ibw';
+    mode=3;
+
+
+    %retVel=2.50e-7;
+    rms_noise = @(x) norm(x) / sqrt(length(x)); %Root Mean Square Funktion. Ist per default nicht in Matlab enthalten, dient der Rauschunterdrückung
+
+    %events=[];
+    currIdx=startIdx;
+    currFoldIdx=startLineIdx;
+    currMapIdx=startMapIdx;
+    %MapNameText='PDMS/ForceMap00';
+    
+
+    EM=[];
+    %% Compute ForceMap Name 
+    for currMapIdx=startMapIdx:1:stopMapIdx
+        EMap=[];
+        lMap=[];
+        GsternMap=[];
+        MapNameText='ForceMap';
+        indexStr=num2str(currMapIdx);
+        indexLength=length(indexStr);
+       
+        for i=1:2-indexLength
+            MapNameText=strcat(MapNameText,'0');
+        end
+        MapNameText=strcat(MapNameText,indexStr);
+        %% compute foldername
+        for currFoldIdx = startLineIdx :1:stopLineIdx 
+            Eline=[];
+            lline=[];
+            Gsternline=[];
+            
+
+            foldernameText='FMLine';
+            filenameText='Line';
+            indexStr=num2str(currFoldIdx);
+            indexLength=length(indexStr);
+
+
+            for i=1:4-indexLength
+                foldernameText=strcat(foldernameText,'0');
+                filenameText=strcat(filenameText,'0');
+
+            end
+            foldernameText = strcat(foldernameText,indexStr);
+            initfilenameText=strcat(filenameText,indexStr,'Point');
+            path = '';
+            path = strcat(direct,'\',MapNameText,'\',foldernameText);
+            cd (path)    
+            %% compute filename
+            for currIdx=startIdx:1:stopIdx
+
+                filenameText=initfilenameText;
+                indexStr= num2str(currIdx);
+                indexLength=length(indexStr);
+
+                for i=1:4-indexLength
+                    filenameText=strcat(filenameText,'0');
+                end
+
+                filename = strcat(filenameText,indexStr,extension);
+                % open file
+                if(exist(filename, 'file') ~= 2)
+                    disp('error in LoadIBW.m: file does not exist...');
+                    disp(filename);
+                    disp(path);
+                    cd
+                    return;
+                end
+
+                fid = fopen(filename);
+
+                if fid == -1;
+                    disp('error in LoadIBW.m: bad file identifier, try again...');
+                    disp(filename);
+                    return;
+                end
+
+                %% reading fileheader
+                % igor-version
+                igorVer = fread(fid, 1, 'short'); %erstes fread
+
+                % reading 'binheader'
+                switch(igorVer) %Zweites und drittes Fread
+                    case 2
+                        fread(fid, 1, 'long');              % The size of the WaveHeader2 data structure plus the wave data plus 16 bytes of padding.
+                        notesize = fread(fid, 1, 'long');   % The size of the note text.
+                        f2be = 16;
+                    case 3
+                        fread(fid, 1, 'long');              % The size of the WaveHeader2 data structure plus the wave data plus 16 bytes of padding.
+                        notesize = fread(fid, 1, 'long');   % The size of the note text.
+                        f2be = 20;
+                    case 5
+                        fread(fid, 1, 'short');             % Checksum over this header and the wave header.
+                        fread(fid, 1, 'long');             % The size of the WaveHeader5 data structure plus the wave data.
+                        formulasize = fread(fid,1,'long');  % The size of the dependency formula, if any.
+                        notesize = fread(fid,1,'long');     % The size of the note text.
+                        f2be = 64;
+                    otherwise
+                        disp(['error: bad igorVer: ', num2str(igorVer)]);
+                        fclose(fid);
+                        return;
+                end
+
+                %% reading 'waveheader'
+                fseek(fid, f2be, 'bof');
+                max_unit_chars = 4;
+
+                switch(igorVer)
+                    case {1, 2, 3, 4}
+                        type = fread(fid, 1, 'short');      % See types (e.g. NT_FP64) above. Zero for text waves.
+                        fread(fid, 1, 'long');              % Used in memory only. Write zero. Ignore on read.
+                        fread(fid, 20, 'char');             % Name of wave plus trailing null.
+                        fread(fid, 1, 'short');             % Write 0. Ignore on read.
+                        fread(fid, 1, 'short');             % Used in memory only. Write zero. Ignore on read.
+                        fread(fid, 1, 'long');              % Used in memory only. Write zero. Ignore on read.
+                        fread(fid, max_unit_chars, 'char'); % Natural data units go here - null if none.
+                        fread(fid, max_unit_chars, 'char'); % Natural x-axis units go here - null if none.
+                        npnts = fread(fid, 1, 'long');      % Number of data points in wave.
+                    case 5
+                        fread(fid, 1, 'long');              % link to next wave in linked list.
+                        fread(fid, 1, 'long');              % DateTime of creation.
+                        fread(fid, 1, 'long');              % DateTime of last modification.
+                        npnts = fread(fid, 1, 'long');      % Total number of points (multiply dimensions up to first zero).
+                        type = fread(fid, 1, 'short');      % See types (e.g. NT_FP64) above. Zero for text waves.
+                    otherwise
+                        disp(['error in LoadIBW.m: bad igorVer: ', num2str(igorVer)]);
+                        disp(filename);
+                        fclose(fid);
+                        return;
+                end
+
+                %% check file position
+                switch(igorVer)
+                    case 1
+                        f2be = 118;
+                    case 2
+                        f2be = 126;
+                    case 3
+                        f2be = 130;
+                    case 5
+                        f2be = 384;
+                    otherwise
+                        % I can't get here, but oh well
+                        disp(['error in LoadIBW.m: bad igorVer: ', num2str(igorVer)]);
+                        disp(filename);
+                        fclose(fid);
+                        return;
+                end
+
+                fseek(fid, f2be, 'bof');
+
+                ops{2} = 'float';
+                ops{4} = 'double';
+                ops{8} = 'char';
+                ops{16} = 'int16';
+                ops{32} = 'int32';
+                ops{72} = 'ubit8';
+                ops{80} = 'uint16';
+                ops{96} = 'uint';
+
+                %% read data
+                if type ~= 0
+                    data = fread(fid, npnts, ops{type});
+                end
+
+                %% read note
+                switch(igorVer)
+                    case {1, 2, 3, 4}
+                        % get past the padding
+                        fseek(fid, 16, 'cof');
+                        note = char(fread(fid, notesize, 'char')');
+                    case 5
+                        if(type == 0)
+                            fseek(fid, -4, 1);
+                            String_indices = fread(fid, 1, 'long');
+                            fseek(fid, String_indices-ftell(fid)+f2be+formulasize, 0);
+                            note = char(fread(fid, notesize, 'char')');
+                        else
+                            fseek(fid, formulasize, 0);
+                            note = char(fread(fid, notesize, 'char')');
+                        end
+                    otherwise
+                        % I can't get here, but oh well
+                        disp(['error in LoadIBW.m: bad igorVer: ', num2str(igorVer)]);
+                        disp(filename);
+                        fclose(fid);
+                        return;
+                end
+
+                %% Extrahieren wichtiger Parameter
+                springpoint = strfind(note, 'SpringConstant: ');
+                springconstant = str2double(note(springpoint(1)+16:springpoint(1)+16+6))*1000;
+
+                sampleRateflag=strfind(note,'NumPtsPerSec: ');
+                sampleRate=str2double(note(sampleRateflag+14:sampleRateflag+14+4));
+
+                dwellTimeflag=strfind(note,'DwellTime1: ');
+                dwellTime=str2double(note(dwellTimeflag+12:dwellTimeflag+12+5));
+
+                forceDistflag=strfind(note,'ForceDist:');
+                forceDist=str2double(note(forceDistflag(1)+10:forceDistflag(1)+10+7));
+                %% close file
+                fclose(fid);
+
+                %% process data for each mode
+                count = length(data);
+                switch(mode)
+                    case 1	% lateral
+                        position = data(int32(count*1/4+1) : int32(count*2/4));
+                        deflection = data(int32(count*3/4+1) : int32(count*4/4));
+                        time = linspace (0,1/4*count/sampleRate,1/4*count)';
+                    case 2	% LVDT Force Clamp
+                        position = data(int32(count*0/2+1) : int32(count*1/2));
+                        deflection = data(int32(count*1/2+1) : int32(count*2/2));
+                        time=linspace(0,0.5*count/sampleRate,0.5*count)';
+                    case 3	% 'Normalfall'
+                        position = data(int32(count*0/3+1) : int32(count*1/3));
+                        deflection = data(int32(count*1/3+1) : int32(count*2/3));
+                        %what = data(int32(count*2/3+1) : int32(count*3/3)); %Was steht
+                        %im letzten Drittel? : Das 2. Drittel Nochmal.
+                        time = linspace(0,1/3*count/sampleRate,1/3*count)';
+                    case 4 %force clamp
+                        deflection = data(int32(count*0/2+1) : int32(count*1/2));
+                        position = data(int32(count*1/2+1) : int32(count*2/2));
+                        time=linspace(0,0.5*count/sampleRate,0.5*count)';
+                    case 5 % Unerwartete veränderung der daten...
+                        position=data(int32(count*0/4+1):int32(count*1/4));
+                        deflection=data(int32(count*1/4+1):int32(count*2/4));
+                        time=linspace(0,1/4*count/sampleRate,1/4*count)';
+                    otherwise
+                        disp(['error: bad mode: ', num2str(mode)]);
+                        disp(filename);
+                        return;
+                end
+               
+               %% Definition einiger nützlicher Variablen
+               %{
+               Hilfreich im Rest des Skriptes
+                datalength: Oft nützlich die Länge des Datensatzes zu kennen
+                ppms: Egtl nur sampleRate*10^-3 wird aber oft gebraucht
+                freq,startfreq,numFreq: allgemein die Anzahl und größeder genutzten Frequenzbereiche für den allgemein
+                gebrauch (vorzugsweise) auch über Eingangsparameter steuerbar 
+                nuldur,fdur: Ebenfalls optimalerweise über Eingangsparameter gesteuert
+                fl,indenterrange: Helfen beim Verständnis               
+               %}
+               datalength=length(position);
+               ppms = sampleRate * 10^-3; %points per millisecond
+               startfreq=1;
+               freqinc=100;
+               endfreq=5000;
+               freq = [1,10,25,50,75,100,150]; % Frequenzenvektor
+               numFreq = numel(freq); % Anzahl der Frequenzbereiche
+               nuldur = 0.50; %Länge der Baseline in s
+               fdur = [5,0.5,0.5,0.5,0.5,0.5,0.5]; %Dauer der Messung mir einer Frequenz in s
+               fl = fdur * sampleRate; %Länge eines Bereiches in Datenpunkten
+               indenterrange=ppms*10^3*2*nuldur;
+               for i=1:numFreq
+                indenterrange=indenterrange+fdur(i)*ppms*10^3; %Länge des Indenterbereiches in Datenpunkten
+               end
+               minheight=1.5*10^-6;
+               maxheight=8.5*10^-6;
+               heightinc=0.5*10^-6;
+               kordur=1;
+               visc=8.9*10^-4; %Wasser
+			   pois = 0.5; %Poisson-Zahl
+               theta = pi*35/180; %Spitzenwinkel in radians
+           
+               %% Einsetzen eines Datensatzes mit bekannter Phasenverschiebung zu Testzwecken
+               %[time,position,deflection,grenze]=CreateData(datalength,ppms,startfreq,freqinc,endfreq,nuldur,fdur);
+               
+               %% Vorverabeitung der Daten
+               % Korrektur der Kraft
+               %{
+               Die Kraft(bzw. Deflection) sollte im Non-Contact Bereich natürlich null sein
+               %}
+               % Wähle die Defl. im Non-Contact Part der (Pos./Defl.)-Kurve als Offset
+                % Non-Contact Part finden
+                startindx = 1;
+                stopindx = 1;
+                i = 1;
+                % Betrachte den Anfang (zeitlich) des Datensatzes auf der Suche nach einer starken Änderung der Steigung 
+                while(1)
+                    startindx = 10 * i * ppms;
+                    stopindx = startindx + 300 * ppms;
+                    % Abbrechen wenn das erste 5tel der Daten gefittet wurde
+                    if startindx > 0.2*datalength
+                        break
+                    end
+                    p = polyfit(position(startindx:stopindx),deflection(startindx:stopindx),1);
+                    slope(1,i) = p(1);
+                % Abbrechen wenn die Steigung von 3.5rms-noise abweicht, aber nicht
+                %   bevor nicht wenigstens die ersten 15ms der Daten erfasst
+                %   wurden
+                    if 3.5*rms_noise(slope) < abs(slope(1,i)) && i > 15*ppms
+                        break
+                    end
+
+
+                    i = i+1;
+                end
+                % Fit über den Non-Contact Part      
+                    warning off
+                    offsetfit = polyfit(position(1:round(startindx)), deflection(1:round(startindx)),1);
+                    
+                % Korrektur der Deflection um den gefundenen offset
+                    deflection = deflection - (position*offsetfit(1))-offsetfit(2);     
+                    warning on
+               %% Bestimmung des Indenterbereiches
+               %{
+               Es interessiert egtl nur was im Bereich des Indenters passiert, daher muss dieser Bereich bestimmt werden
+               %}
+                    %{                 
+                    Ersetzt jeden Punkt des Datensatzes durch den Mittelwert über die umgebenden 20 ppms
+                    Die Zahl ergibt sich daraus, dass dies die längste Zeit ist die es Dauert um eine volle Periode bei der geringsten Frequenz von
+                    100 Hz zu durchlaufen, dies sollte zu einer glättung des Plateus mit nur geringer veränderung der Plateauposition führen
+                    %}
+                   filter=10; %Längste gefilterte Wellenlänge in ppms
+                   posflat=[position(1:filter*ppms);zeros(datalength-2*filter*ppms-1,1);position(datalength-filter*ppms:end)];                                                         
+                   for i=filter*ppms+1:datalength-filter*ppms
+                        posflat(i)=mean(position(i-filter*ppms:i+filter*ppms));
+                   end
+                    %{
+                    Führt die Glättungsfunktion erneut durch um höhere Glätte zu erhalten (optional)
+                    for j=1:Glaettungszahl
+                        for i=10*ppms+1:datalength-10*ppms
+                        posflat(i)=mean(posflat(i-10*ppms:i+10*ppms));
+                        end
+                    end
+                    %}    
+                    %{
+                    Der Anfang des Plateaus kann gefunden werden, indem die Steigung der Anfahrgerade bestimmt,
+                    und ein absinken derselben unter 10% gesucht wird (alles Absolutwerte)
+                    %}    
+                    slopevec=zeros(1,20);
+                    steigungalt=0;
+                    maxsteigung=0;
+                    i=1;
+                    while true
+                        
+                            startindx=1+2*i*ppms;
+                            stopindx=startindx+20*ppms;
+                            interval=startindx:stopindx;
+                            %disp(strcat('Vor','|',num2str(i),'|',num2str(startindx),'|',num2str(stopindx),'|',num2str(maxsteigung))) %Debugging
+                            if stopindx > 0.9*datalength
+                            disp('Warnung: Ende der Daten erreicht')                            
+                            break
+                            end
+                            maxsteigung=abs(max(position(interval)-min(position(interval))));
+                        if i < 20
+                            slopevec(1,i)=maxsteigung;
+                        end
+                        if i==20
+                            slope=mean(slopevec);
+                            deltaalt=10*slope; % HIer soll nur sichergestellt werden das die übernächste if abfrage nicht sofort triggert.
+                            steigungalt=slope; %sonst geht der erste wert von deltasteigung sonstwohin
+                        end
+                        
+                        if i>20                            
+                            if maxsteigung<0.1*slope; 
+                                deltasteigung=steigungalt-maxsteigung;
+                                    if deltaalt<=deltasteigung %suche nach dem Punkt, andem die steigung nicht mehr kleiner wird.
+                                        pg(1)=startindx;
+                                        break
+                                    end
+                                deltaalt=deltasteigung;
+                                steigungalt=maxsteigung;
+                            end                                                
+                        end
+                        i=i+1;
+                    end
+                    %{
+                    Um das Ende des Plateus zu suchen wenden wir den selben Code an, suchen aber von hinten.
+                    %}
+                    slopevec=zeros(1,20);
+                    steigungalt=0;
+                    maxsteigung=0;
+                    i=1;
+                    while true                        
+                        startindx=datalength-2*i*ppms;
+                        stopindx=startindx-20*ppms;
+                        interval=startindx:-1:stopindx;
+                        %disp(strcat('Rück','|',num2str(i),'|',num2str(startindx),'|',num2str(stopindx),'|',num2str(maxsteigung))) %Debugging
+                        if stopindx < 0.1*datalength
+                            disp('Warnung: Anfang der Daten erreicht')                            
+                            break
+                        end
+                        maxsteigung=abs(max(position(interval)-min(position(interval))));
+                        if i < 20
+                            slopevec(1,i)=maxsteigung;                           
+                        end
+                        if i==20
+                            slope=mean(slopevec);
+                            deltaalt=10*slope; % HIer soll nur sichergestellt werden das die übernächste if abfrage nicht sofort triggert.
+                            steigungalt=slope; %sonst geht der erste wert von deltasteigung sonstwohin
+                        end
+                        
+                        if i>=20                            
+                            if maxsteigung<0.1*slope; 
+                                deltasteigung=steigungalt-maxsteigung;
+                                    if deltaalt<=deltasteigung %suche nach dem Punkt, andem die steigung nicht mehr kleiner wird.
+                                        pg(2)=startindx;
+                                        break
+                                    end
+                                deltaalt=deltasteigung;
+                                steigungalt=maxsteigung;
+                            end                                    
+                        end
+                        i=i+1;
+                    end               
+                %% Bestimmung von  z-Contact
+                %{
+                   z-contact kann bestimmt werden über den Schnittpunkt der
+                   Grundgeraden im Position-Deflection Graphen mit der loading Trace
+                   desselben Graphen
+                %}                
+                %Beschränkung der Daten auf den Anfahrweg
+                maxdef=find(deflection==max(deflection));
+                poson=position(1:maxdef);
+                defon=deflection(1:maxdef);
+                %Bestimme Gerade durch den Kraftfreien Part        
+                slope=[];
+                for i=1:length(poson)
+                    startindx=i*10*ppms;
+                    stopindx=startindx+10*ppms;
+                    parslope=polyfit(poson(startindx:stopindx),defon(startindx:stopindx),1);
+                    slope=[slope parslope(1)];
+                    %Beachte dabei dass wenigstens die ersten 200ms aufgenommen werden müssen
+                    %Breche ab wenn die Steigung groß wird
+                    %Breche ab wenn die erste Sekunde aufgenommen ist
+                    if parslope(1) > 3*rms_noise(slope) || i>100 && i>20;
+                        grundfit=polyfit(poson(1:startindx),defon(1:startindx),1);
+                        break
+                    end                    
+                end                
+                slope=[];
+                %Bestimme Gerade durch den Kontakt Part                
+                for i=1:length(poson)
+                    startindx=length(poson)-i*10*ppms;
+                    stopindx=startindx-10*ppms;
+                    parslope=polyfit(poson(startindx:-1:stopindx),defon(startindx:-1:stopindx),1);
+                    slope=[slope parslope(1)];
+                    %Beachte dabei dass wenigstens die ersten 200ms aufgenommen werden müssen
+                    %Breche ab wenn die Steigung klein wird
+                    %Breche ab wenn die letzte halbe Sekunde aufgenommen ist
+                    if parslope(1) < 0.01*rms_noise(slope) || i>20 && i>20;
+                        loadfit=polyfit(poson(startindx:end),defon(startindx:end),1);
+                        loadstart=startindx;
+                        break
+                    end                    
+                end
+                 %Grundfunktion & Loadfunktion
+                Grund = @(x) grundfit(1)*x+grundfit(2);
+                Load = @(x) loadfit(1)*x+loadfit(2);
+                %Finde den Schnittpunkt von Grund und Load
+                diffGrundLoad= @(x) Grund(x)-Load(x);
+                schnittpunkt=find(abs(diffGrundLoad(poson))==min(abs(diffGrundLoad(poson))));
+                %Dessen position Wert ist zcont
+                zcont=position(schnittpunkt); 
+               %}
+             %% Berechnung des Komplexen Moduls
+                 %{
+                    Die eigentliche Aufgabe des Skriptes 
+                    Für jeden Frequenzbereich werden Kraft, Zeit und Position bestimmt
+                    Die Kraft wird direkt Fourier-Transformiert, während die Position zusammen mit zcontact zur bestimmung der Eindrückung(Delta) verwendet wird
+                    Delta wird dann ebenfalls Fouriertransformiert und zusammen mit der Kraft zur bestimmung des Komplexen Schermoduls genutzt 
+                    (siehe Quelle http://www.sciencedirect.com/science/article/pii/S0006349503750140 )
+                 %}
+                 %{
+                 Das Indenterintervall sollte eine bestimmte größe indenterrange haben. da die Plateau erkennung nicht unfehlbar ist
+                 wird das Interval an beiden enden soweit verlängert dass wenigstens die mindestrange erreicht ist damit die aufteilung in indenter-
+                 bereiche aufgeht
+                 %}            
+				pgb=pg; %speichere berechnete plateaukoordinaten für debuggingzwecke
+                platlength=pg(2)-pg(1); %Berechnete plateulänge
+                if platlength<indenterrange
+                    dif=round(indenterrange-platlength);
+                    if dif > 0.2*indenterrange
+                        disp(strcat('Warnung: Plateau zu klein in ',path,filename))                
+                    end
+                    pg(1)=round(pg(1)-1/2*dif);
+                    pg(2)=round(pg(2)+1/2*dif);
+                end
+                
+               % Herausschneiden des Indenterbereichs
+                 posindent = position  (pg(1):pg(2));
+                 defindent = deflection(pg(1):pg(2));
+                 timindent = time      (pg(1):pg(2)); 
+               % Aufteilen in Bereiche mit Länge fl                                                
+                freqStart = nuldur*sampleRate; % Ende der Baseline
+                posspitzindent=posindent-defindent; %%Echte position der Spitze (Piezoposition - deflection) für die gesamte Indenterrange
+                Delta_0=abs(median(posspitzindent)-zcont);%Grundindentation = Kontaktpunkt - Median der Indenterposition 
+                %Für jeden Frequenzbereich wird Gstern1Line gesondert berechnet
+                Gstern1point=zeros(1,numFreq);
+                E1point=Gstern1point;
+                l1point=Gstern1point;
+                % Berechung des HDD Korrekturfactors
+                %{
+                if b0==0;
+                    curdir=cd;
+                    cd(direct);
+                    [b0,gofspherefit,heff,aeff]=HDDcorrect(visc,minheight,maxheight,heightinc,mode,kordur);
+                    cd(curdir);
+                end
+                %}
+                %Schneide Startpadding ab
+                timindent=timindent(freqStart:end);
+                defindent=defindent(freqStart:end);
+                posindent=posindent(freqStart:end);
+                for i=1:numFreq                                               
+                    Fd=defindent(1:fl(i));                                
+                    Fp=posindent(1:fl(i));                                
+                    Ft=timindent(1:fl(i));
+                   % Nach dem Herauslösen der Frequenzspezifischen Bereiche wird deren Anteil aus den Indentersätzen
+                   % entfernt
+                   timindent=timindent(length(Ft):end);
+                   defindent=defindent(length(Fd):end);
+                   posindent=posindent(length(Fp):end);
+                   % Eigentliche Berechnung des Shermoduls        
+                    R=10*10^-9; %Spitzenradius
+                    %deltaamp=10*10^-9; % Indenter Amplitude, sollte der Funktion übergeben werden !!! 
+                    %{
+                    Um die Eindrückung der Zelle korrekt zu bestimmen muss die Verbiegung des CL von den Positionsdaten abgezogen werden, um die tatsächliche Position der CL Spitze zu bestimmen 
+                    %}
+                    Fposspitz=Fp-Fd; %Echte position der Spitze (Piezoposition - deflection) Frequenzaufgelöst                               
+                    %{
+                    Interessant ist hier die Abweichung des Indenters von der Grundindentation, wir wollen quasi die Schwingung um den Nullpunkt kennen
+                    %}
+                    Delta=zeros(length(Fd),numFreq);                
+                    Delta=Fposspitz-median(Fposspitz); 
+                    %{
+                    Indentation = spitzenposition - mittlere spitzenposition somit schwankung um null 
+                    %}               
+                    %{
+                    Hier interessiert uns die Eindrückung für jeden einzelnen Punkt, daher nehmen wir direkt Fp
+                    %}
+                    force = Fd * springconstant;
+                    doubfurforce=fft(force);
+                    doubfurDelta=fft(Delta);
+                    %Nur die linke Seite der Trafo wird gebraucht
+                    freqlength = length(doubfurforce);
+                    furforce=zeros(round(freqlength/2),numFreq);
+                    furDelta=furforce;               
+                    furforce=doubfurforce(1:round(freqlength/2));
+                    furDelta=doubfurDelta(1:round(freqlength/2));                                    
+					maxforce=max(furforce);
+					maxDelta=max(furDelta);
+					%sicherstellen das die peaks positiv sind
+					%{
+					if maxforce(i,1) < 0
+						maxforce(i,1)=maxforce(i,1)*-1;
+					end
+					if maxDelta(i,1) <0
+						maxDelta(i,1)=maxDelta(i,1)*-1;
+					end 
+					%}                                      
+                    %{
+                    for i=1:numFreq
+                        furforce=[furforce,whfurforce(round(length(whfurforce)/2):length(whfurforce)),i];
+                        furDelta=[furDelta,whfurDelta(round(length(whfurDelta)/2):length(whfurDelta),i)];
+                    end
+                    %}
+                   
+                   % Berechnung von Gstern1Line    
+                   % Gstern1Freq=((1-pois)./(3*Delta_0.*tan(theta))).*((maxforce./maxDelta)-2*pi*1i*freq(i)*b0); 
+                    Gstern1Freq=((1-pois)./(3*Delta_0.*tan(theta))).*((maxforce./maxDelta)); %ohne b0
+                    G(:,1)=real(Gstern1Freq)';
+                    G(:,2)=imag(Gstern1Freq)';
+                    Gstern1point(1,i)=Gstern1Freq;
+                    E1point(1,i)=3*real(Gstern1Freq);
+                    l1point(1,i)=G(:,2)./G(:,1);
+                end
+                Gsternline=[Gsternline;Gstern1point];
+                Eline=[Eline;E1point]; 
+                lline=[lline;l1point];
+              %{
+               for b=1:numFreq
+                   figure(b)
+                   set(b,'Name',strcat(num2str(freq(b)),'Hz'))
+                   plot(furforce(:,b),'+');
+               end
+               for c=1:numFreq
+                   figure(c)
+                   set(c,'Name',strcat(num2str(freq(c)),'Hz'))
+                   plot(furDelta(:,c),'+');
+               end
+               %}
+                
+                
+                 b=1;
+                 c=2;
+                 scrsz=get(0,'ScreenSize');                            
+                figure(b)
+                    set(b,'Name',filename);
+                    set(b,'Position',[1 scrsz(4)/2 scrsz(3)/2 scrsz(4)/2])                    
+                    hold on                    
+                    plot(time,deflection) 
+                    hold off
+                    saveas(b,strcat('Figure',num2str(pointcounter),'def','.jpg'));
+                    close(b)
+                %{
+                figure(c)
+                    set(c,'Name',filename);
+                    set(c,'Position',[scrsz(3)/2 scrsz(4)/2 scrsz(3)/2 scrsz(4)/2])
+                    plot(poson,defon)
+                    hold on
+                    plot(poson(schnittpunkt),defon(schnittpunkt),'or')
+                    plot(poson,grundfit(1)*poson+grundfit(2),'r')
+                    plot(poson(loadstart:end),loadfit(1)*poson(loadstart:end)+loadfit(2),'g')
+                    hold off                    
+                    
+                %close(b);
+               %}
+                disp(strcat(path,'\',filename,' ','Abgeschlossen!',num2str(pointcounter)))
+                pointcounter = pointcounter+1;
+            end %ende der for - schleife
+                cd (direct);
+                GsternMap=[GsternMap;Gsternline];
+                EMap=[EMap;Eline];
+                lMap=[lMap;lline];
+        end
+        Gsternall=[Gsternall;GsternMap];
+        Emod=[Emod;EMap];
+        loss=[loss;lMap];
+        
+        
+    end
+        catch exeption
+            fprintf(2,'%s',getReport(exeption))
+end
+datevector=datevec(now);
+date=sprintf('%04u%02u%02u%02u%02u%02u',datevector(1:5),round(datevector(6)));
+cd(direct);
+%save (date,'Emod','loss','Gsternall')
+save(date)
+toc
+disp('Fertig!')
