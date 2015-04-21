@@ -1,0 +1,383 @@
+%Korrektur des Hydrodynamischen Strömungswiederstandes
+%function[b0,gofspherefit,heff,aeff]=HDDcorrect(visc,minheight,maxheight,heightinc,mode,kordur)
+%{
+%Übergebene Vars
+visc; %Viscosität
+minheight
+maxheight
+heightinc
+mode
+kordur % Dauer der Indentation bei der Korrekturmessung
+%}
+contactheight=6.9*10^-7;
+%minheight=1.5*10^-6; %mindesthöhe über substrat
+%maxheight=8.5*10^-6; %Maximalhöhe über Substrat
+%heightinc=0.5*10^-6; % Höheninkrement
+%heights=minheight:heightinc:maxheight;
+heights=[1.5,2,2.5,3,3.5,4,4.5,5,5.5,6,7,7.5,8,8.5]*10-6;
+heights=heights+contactheight;
+numHeights=numel(heights);
+%mode=3;
+%kordur=;
+height=zeros(numHeights,1);
+b=zeros(numHeights,1);
+errb=b;
+
+%% Dateien finden
+
+    foldercontent=ls;
+    Kurvenindex=zeros(length(foldercontent),1);
+    for i=1:length(foldercontent)
+       Kurvenindex(i)=isempty(regexp(foldercontent(i,:),'Korrekturkurve','ONCE'));
+    end
+    Kurven=find(Kurvenindex==0);
+    if length(Kurven) ~= numHeights
+        disp('Error: Unterschiedliche Anzahl von Korrekurkurven und Messhöhen')
+        break
+    end
+for i=1:numHeights
+        filename = foldercontent(Kurven(i),:);
+
+    % open file
+        if(exist(filename, 'file') ~= 2)
+            disp('error in LoadIBW.m: file does not exist...');
+            disp(filename)
+            cd
+            return;
+        end
+
+        fid = fopen(filename);
+
+        if fid == -1;
+            disp('error in LoadIBW.m: bad file identifier, try again...');
+            disp(filename);
+            return;
+        end
+
+        %% reading fileheader
+        % igor-version
+        igorVer = fread(fid, 1, 'short'); %erstes fread
+
+        % reading 'binheader'
+        switch(igorVer) %Zweites und drittes Fread
+            case 2
+                fread(fid, 1, 'long');              % The size of the WaveHeader2 data structure plus the wave data plus 16 bytes of padding.
+                notesize = fread(fid, 1, 'long');   % The size of the note text.
+                f2be = 16;
+            case 3
+                fread(fid, 1, 'long');              % The size of the WaveHeader2 data structure plus the wave data plus 16 bytes of padding.
+                notesize = fread(fid, 1, 'long');   % The size of the note text.
+                f2be = 20;
+            case 5
+                fread(fid, 1, 'short');             % Checksum over this header and the wave header.
+                fread(fid, 1, 'long');             % The size of the WaveHeader5 data structure plus the wave data.
+                formulasize = fread(fid,1,'long');  % The size of the dependency formula, if any.
+                notesize = fread(fid,1,'long');     % The size of the note text.
+                f2be = 64;
+            otherwise
+                disp(['error: bad igorVer: ', num2str(igorVer)]);
+                fclose(fid);
+                return;
+        end
+
+        %% reading 'waveheader'
+        fseek(fid, f2be, 'bof');
+        max_unit_chars = 4;
+
+        switch(igorVer)
+            case {1, 2, 3, 4}
+                type = fread(fid, 1, 'short');      % See types (e.g. NT_FP64) above. Zero for text waves.
+                fread(fid, 1, 'long');              % Used in memory only. Write zero. Ignore on read.
+                fread(fid, 20, 'char');             % Name of wave plus trailing null.
+                fread(fid, 1, 'short');             % Write 0. Ignore on read.
+                fread(fid, 1, 'short');             % Used in memory only. Write zero. Ignore on read.
+                fread(fid, 1, 'long');              % Used in memory only. Write zero. Ignore on read.
+                fread(fid, max_unit_chars, 'char'); % Natural data units go here - null if none.
+                fread(fid, max_unit_chars, 'char'); % Natural x-axis units go here - null if none.
+                npnts = fread(fid, 1, 'long');      % Number of data points in wave.
+            case 5
+                fread(fid, 1, 'long');              % link to next wave in linked list.
+                fread(fid, 1, 'long');              % DateTime of creation.
+                fread(fid, 1, 'long');              % DateTime of last modification.
+                npnts = fread(fid, 1, 'long');      % Total number of points (multiply dimensions up to first zero).
+                type = fread(fid, 1, 'short');      % See types (e.g. NT_FP64) above. Zero for text waves.
+            otherwise
+                disp(['error in LoadIBW.m: bad igorVer: ', num2str(igorVer)]);
+                disp(filename);
+                fclose(fid);
+                return;
+        end
+
+        %% check file position
+        switch(igorVer)
+            case 1
+                f2be = 118;
+            case 2
+                f2be = 126;
+            case 3
+                f2be = 130;
+            case 5
+                f2be = 384;
+            otherwise
+                % I can't get here, but oh well
+                disp(['error in LoadIBW.m: bad igorVer: ', num2str(igorVer)]);
+                disp(filename);
+                fclose(fid);
+                return;
+        end
+
+        fseek(fid, f2be, 'bof');
+
+        ops{2} = 'float';
+        ops{4} = 'double';
+        ops{8} = 'char';
+        ops{16} = 'int16';
+        ops{32} = 'int32';
+        ops{72} = 'ubit8';
+        ops{80} = 'uint16';
+        ops{96} = 'uint';
+
+        %% read data
+        if type ~= 0
+            data = fread(fid, npnts, ops{type});
+        end
+
+        %% read note
+        switch(igorVer)
+            case {1, 2, 3, 4}
+                % get past the padding
+                fseek(fid, 16, 'cof');
+                note = char(fread(fid, notesize, 'char')');
+            case 5
+                if(type == 0)
+                    fseek(fid, -4, 1);
+                    String_indices = fread(fid, 1, 'long');
+                    fseek(fid, String_indices-ftell(fid)+f2be+formulasize, 0);
+                    note = char(fread(fid, notesize, 'char')');
+                else
+                    fseek(fid, formulasize, 0);
+                    note = char(fread(fid, notesize, 'char')');
+                end
+            otherwise
+                % I can't get here, but oh well
+                disp(['error in LoadIBW.m: bad igorVer: ', num2str(igorVer)]);
+                disp(filename);
+                fclose(fid);
+                return;
+        end
+
+        %% Extrahieren wichtiger Parameter
+        springpoint = strfind(note, 'SpringConstant: ');
+        springconstant = str2double(note(springpoint(1)+16:springpoint(1)+16+6))*1000;
+
+        sampleRateflag=strfind(note,'NumPtsPerSec: ');
+        sampleRate=str2double(note(sampleRateflag+14:sampleRateflag+14+4));
+
+        dwellTimeflag=strfind(note,'DwellTime1: ');
+        dwellTime=str2double(note(dwellTimeflag+12:dwellTimeflag+12+5));
+
+        forceDistflag=strfind(note,'ForceDist:');
+        forceDist=str2double(note(forceDistflag(1)+10:forceDistflag(1)+10+7));
+        %% close file
+        fclose(fid);
+
+        %% process data for each mode
+        count = length(data);
+        switch(mode)
+            case 1	% lateral
+                position = data(int32(count*1/4+1) : int32(count*2/4));
+                deflection = data(int32(count*3/4+1) : int32(count*4/4));
+                time = linspace (0,1/4*count/sampleRate,1/4*count)';
+            case 2	% LVDT Force Clamp
+                position = data(int32(count*0/2+1) : int32(count*1/2));
+                deflection = data(int32(count*1/2+1) : int32(count*2/2));
+                time=linspace(0,0.5*count/sampleRate,0.5*count)';
+            case 3	% 'Normalfall'
+                position = data(int32(count*0/3+1) : int32(count*1/3));
+                deflection = data(int32(count*1/3+1) : int32(count*2/3));
+                %what = data(int32(count*2/3+1) : int32(count*3/3)); %Was steht
+                %im letzten Drittel? : Das 2. Drittel Nochmal.
+                time = linspace(0,1/3*count/sampleRate,1/3*count)';
+            case 4 %force clamp
+                deflection = data(int32(count*0/2+1) : int32(count*1/2));
+                position = data(int32(count*1/2+1) : int32(count*2/2));
+                time=linspace(0,0.5*count/sampleRate,0.5*count)';
+            case 5 % Unerwartete veränderung der daten...
+                    position=data(int32(count*0/4+1):int32(count*1/4));
+                    deflection=data(int32(count*1/4+1):int32(count*2/4));
+                    time=linspace(0,1/4*count/sampleRate,1/4*count)';
+            otherwise
+                disp(['error: bad mode: ', num2str(mode)]);
+                disp(filename);
+                return;
+        end
+
+      %% Definition einiger nützlicher Variablen
+      datalength=length(position);
+      ppms = sampleRate * 10^-3; %points per millisecond
+      indenterrange= kordur*sampleRate;
+      %% Eigentliche Datenverarbeitung
+        %Tiefpassfilterung der Daten für die Plateausuche
+            %{                 
+            Ersetzt jeden Punkt des Datensatzes durch den Mittelwert über die umgebenden 20 ppms
+            Die Zahl ergibt sich daraus, dass dies die längste Zeit ist die es Dauert um eine volle Periode bei der geringsten Frequenz von
+            100 Hz zu durchlaufen, dies sollte zu einer glättung des Plateus mit nur geringer veränderung der Plateauposition führen
+            %}
+            filter=10; %höchste gefilterte Wellenlänge in ms
+            posflat=[position(1:filter*ppms);zeros(datalength-2*filter*ppms-1,1);position(datalength-filter*ppms:end)];                                                         
+           for j=filter*ppms+1:datalength-filter*ppms
+                posflat(j)=mean(position(j-filter*ppms:j+filter*ppms));
+           end
+          %Deflectiondaten glätten
+          filter=1; %höchste gefilterte Wellenlänge in ms
+            defflat=[deflection(1:filter*ppms);zeros(datalength-2*filter*ppms-1,1);deflection(datalength-filter*ppms:end)];                                                         
+           for j=filter*ppms+1:datalength-filter*ppms
+                defflat(j)=mean(deflection(j-filter*ppms:j+filter*ppms));
+           end
+           
+      % Messhöhe ablesen, dient dazu sicherzustellen, dass die Korrekturkurven in ansteigender Höhenreihenfolge
+      % berechnet werden
+      
+        height(i)=max(posflat);
+      % Indenterrange finden
+        slopevec=zeros(1,20);
+        steigungalt=0;
+        maxsteigung=0;
+        j=1;
+        while true
+                startindx=1+2*j*ppms;
+                stopindx=startindx+20*ppms;
+                interval=startindx:stopindx;
+                %disp(strcat('Vor','|',num2str(j),'|',num2str(startindx),'|',num2str(stopindx),'|',num2str(maxsteigung))) %Debugging
+                if stopindx > 0.9*datalength
+                disp('Warnung: Ende der Daten erreicht')                            
+                break
+                end
+                maxsteigung=abs(max(posflat(interval)-min(posflat(interval))));
+            if j < 20
+                slopevec(1,j)=maxsteigung;
+            end
+            if j==20
+                slope=mean(slopevec);
+                deltaalt=10*slope; % HIer soll nur sichergestellt werden das die übernächste if abfrage nicht sofort triggert.
+                steigungalt=slope; %sonst geht der erste wert von deltasteigung sonstwohin
+            end
+            if j>20                            
+                if maxsteigung<0.1*slope; 
+                    deltasteigung=steigungalt-maxsteigung;
+                        if deltaalt<=deltasteigung %suche nach dem Punkt, andem die steigung nicht mehr kleiner wird.
+                            pg(1)=startindx;
+                            break
+                        end
+                    deltaalt=deltasteigung;
+                    steigungalt=maxsteigung;
+                end                                                
+            end
+            j=j+1;
+        end
+        %{
+        Um das Ende des Plateaus zu suchen wenden wir den selben Code an, suchen aber von hinten.
+        %}
+        slopevec=zeros(1,20);
+        steigungalt=0;
+        maxsteigung=0;
+        j=1;
+        while true                        
+            startindx=datalength-2*j*ppms;
+            stopindx=startindx-20*ppms;
+            interval=startindx:-1:stopindx;
+            %disp(strcat('Rück','|',num2str(j),'|',num2str(startindx),'|',num2str(stopindx),'|',num2str(maxsteigung))) %Debugging
+            if stopindx < 0.1*datalength
+                disp('Warnung: Anfang der Daten erreicht')                            
+                break
+            end
+            maxsteigung=abs(max(posflat(interval)-min(posflat(interval))));
+            if j < 20
+                slopevec(1,j)=maxsteigung;                           
+            end
+            if j==20
+                slope=mean(slopevec);
+                deltaalt=10*slope; % HIer soll nur sichergestellt werden das die übernächste if abfrage nicht sofort triggert.
+                steigungalt=slope; %sonst geht der erste wert von deltasteigung sonstwohin
+            end
+
+            if j>=20                            
+                if maxsteigung<0.1*slope; 
+                    deltasteigung=steigungalt-maxsteigung;
+                        if deltaalt<=deltasteigung %suche nach dem Punkt, andem die steigung nicht mehr kleiner wird.
+                            pg(2)=startindx;
+                            break
+                        end
+                    deltaalt=deltasteigung;
+                    steigungalt=maxsteigung;
+                end                                    
+            end
+            j=j+1;
+        end
+        %Überprüfe ob die Plateaulänge mindestens die eingesetzte indenterrange ist sonst kommt es zu fehlern im Skript
+        platlength=pg(2)-pg(1); %Berechnete plateulänge
+                if platlength<indenterrange
+                    dif=round(indenterrange-platlength);
+                    pg(1)=round(pg(1)-1/2*dif);
+                    pg(2)=round(pg(2)+1/2*dif);
+                end
+    %herausschneiden der Daten
+      posindent=position(pg(1):pg(2));
+      timindent=time(pg(1):pg(2));
+      defindent=defflat(pg(1):pg(2));    
+    % Um b(h) zu berehcnen muss nun H_A(f)=F(f)/z(f) (nach Alcaraz2) bestimmt werden
+    % Hierzu müssen F(f) und z(f) ersteinmal bekannt sein
+
+    %sinusfit an den Plateaubereich
+    % Offset entfernen
+    posindent=posindent-mean(posindent);
+    defindent=defindent-mean(defindent);
+    findent=defindent*springconstant;
+    posfit=fit(timindent,posindent,'sin1');
+    deffit=fit(timindent,defindent,'sin1');
+    forfit=fit(timindent,findent,'sin1');
+    posparms=coeffvalues(posfit);
+    defparms=coeffvalues(deffit);
+    forparms=coeffvalues(forfit);
+    posfuncder=@(x) posparms(1)*posparms(2)*cos(x*posparms(2)+posparms(3)); %Ableitung der position
+    deffuncder=@(x) defparms(1)*defparms(2)*cos(x*defparms(2)+defparms(3)); %Ableitung der position
+    forfunc=@(x) forparms(1)*sin(x*forparms(2)+forparms(3));
+    forfunceval=feval(forfunc,timindent);
+    %Fourier Trafo von forfunceval
+    f=(0:length(findent)-1)*sampleRate/length(findent);
+    t=timindent-timindent(1); %Zeitskala nullen
+    furforfuncevaldoub=abs(fft(forfunceval,length(t)));
+    furforfunceval=furforfuncevaldoub(1:round(length(furforfuncevaldoub)/2));
+    %Fourier Trafo von nu
+    nu=posfuncder(timindent)-deffuncder(timindent); %relative liquid CL geschwindigkeit
+    abs(fft(nu,length(t)));
+    nufur=(ans(1:round(length(ans)/2)));
+    %tempb=max(abs(fft(forfunceval)))/max(abs(fft(nu)));
+    tempb=max(furforfunceval)./max(nufur);
+    b(i)=mean(tempb);
+    errb(i)=std(tempb);
+    %defindentall(i,:)=defindent;
+    
+end
+% Kontrolle ob die Höhen in aufsteigender Reihenfolge abgearbeitet wurden
+% Klüger wäre es natürlich dies logisch sicherzustellen
+if issorted(heights)
+    if heights(1)>heights(end)
+        disp('Fehler:Kurvenreihenfolge invertiert!')
+    else
+        disp('Alles OK bei der Kurvenreihenfolge')
+    end
+else
+    disp('Fehler:Kurven sind durcheinander')
+end
+%
+spheremod=fittype('(6*pi*visc*aeff.^2)./(h+heff)','coefficients',{'aeff','heff'},'independent','h','problem','visc');
+start=[1.6*10^3,6]*10^-6;
+[spherefit,gofspherefit]=fit(heights',b,spheremod,'problem',visc,'StartPoint',start);
+spherecoef=coeffvalues(spherefit);
+aeff=spherecoef(1);
+heff=spherecoef(2);
+
+spherefunc=@(h)(6*pi*visc*aeff.^2)./(h+heff);
+b0=feval(spherefunc,0);
+%}
