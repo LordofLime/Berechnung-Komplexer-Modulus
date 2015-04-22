@@ -294,7 +294,7 @@ try
                theta = pi*35/180; %Spitzenwinkel in radians
            
                %% Einsetzen eines Datensatzes mit bekannter Phasenverschiebung zu Testzwecken
-               %[time,position,deflection,grenze]=CreateData(datalength,ppms,startfreq,freqinc,endfreq,nuldur,fdur);
+               [time,position,deflection,grenze]=CreateData(datalength,ppms,freq,nuldur,fdur);
                
                %% Vorverabeitung der Daten
                % Korrektur der Kraft
@@ -508,7 +508,9 @@ try
                     pg(1)=round(pg(1)-1/2*dif);
                     pg(2)=round(pg(2)+1/2*dif);
                 end
-                
+               % Einfügen der für pg von CreateData angegebenen Werte (Für den Fall das der Suchalgorithmus für die Erstellten Daten nicht funktioniert)
+               %pg(1)=grenze;
+               %pg(2)=pg(1)+indenterrange;
                % Herausschneiden des Indenterbereichs
                  posindent = position  (pg(1):pg(2));
                  defindent = deflection(pg(1):pg(2));
