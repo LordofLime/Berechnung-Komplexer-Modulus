@@ -1,5 +1,5 @@
 %Testdatensatz um shertest mit definitv ergebnisbehafteten Daten zu füttern
-function [timedata,posdata,defdata,grenze] = CreateData(datalength,ppms,freq,nuldur,fdur)
+%function [timedata,posdata,defdata,grenze] = CreateData(datalength,ppms,freq,nuldur,fdur)
 %freqinc)
 %Position
 %1s linearer anstieg von -8*10^-6 bis -5*10^-6 + 2s nullinie bei -5*10^-6 + 10 0.1s intervalle mit
@@ -23,15 +23,19 @@ function [timedata,posdata,defdata,grenze] = CreateData(datalength,ppms,freq,nul
     %Frequenzen   
     d=-4*10^-6;
     a=2*10^-8;
-    freq=[startfreq:freqinc:endfreq];
+    %freq=[startfreq:freqinc:endfreq];
     kreisfreq=freq.*2*pi;
     %Runden der kreisfrequenz sonst passieren schlimme dinge
     kreisfreq= round(kreisfreq*100)/100;
-    numFreq=numel(freq);
-    i=1;
+    numFreq=numel(freq);  
+    posdata3=[];
     for i=1:numFreq
-        b=kreisfreq(i);
-        posdata3(1+(i-1)*fdur(i)*1000*ppms:i*fdur(i)*1000*ppms)=a*sin(b*(0.0001:0.0001:0.5))+d;   
+        sinlength=zeros(1,1000*ppms*fdur(i));
+        for j=1:1000*ppms*fdur(i)
+            sinlength(j)=j*fdur(i)/(1000*ppms*fdur(i));
+        end    
+        b=kreisfreq(i);        
+        posdata3=[posdata3 a*sin(b*(sinlength))+d];        
     end
     restlength=datalength-length(posdata2)-length(posdata3);
     posinterv1=1:round(1/2*restlength);
@@ -51,21 +55,29 @@ function [timedata,posdata,defdata,grenze] = CreateData(datalength,ppms,freq,nul
     funkpospart4= @(x) pos4fit(1)*x + pos4fit(2);    
     posdata4=funkpospart4(posinterv4);
 
-    posdata=[posdata1,posdata2,posdata3,posdata4]; 
+    posdata=[posdata1,posdata2,posdata3,posdata4]'; 
 %% Deflection
 
 defdata2=ones(1,length(posdata2))*2*10^-8;
 a=5*10^-9;
 d=2*10^-8;
+%for i=1:numFreq
+%        b=kreisfreq(i);
+%        defdata3(1+(i-1)*100*ppms:i*100*ppms)=a*sin(b*(0.0001:0.0001:0.5)+i*(1/50*pi))+d;%%
+%end
+defdata3=[];
 for i=1:numFreq
-        b=kreisfreq(i);
-        defdata3(1+(i-1)*100*ppms:i*100*ppms)=a*sin(b*(0.0001:0.0001:0.5)+i*(1/50*pi))+d;
+    sinlength=zeros(1,1000*ppms*fdur(i));
+    for j=1:1000*ppms*fdur(i)
+        sinlength(j)=j*fdur(i)/(1000*ppms*fdur(i));
+    end    
+    b=kreisfreq(i);    
+        defdata3=[defdata3 a*sin(b*(sinlength)+i*1/50*pi)+d];    
 end
-
 defdata1=zeros(1,length(posdata1));
 defdata4=zeros(1,length(posdata4));
-defdata=[defdata1,defdata2,defdata3,defdata4]; 
+defdata=[defdata1,defdata2,defdata3,defdata4]'; 
 %% Time
-timedata=[1/(ppms*1000):1/(ppms*1000):length(posdata)/(ppms*1000)];
+timedata=1/(ppms*1000):1/(ppms*1000):length(posdata)/(ppms*1000);
 grenze(1)=length(posinterv1);
  
