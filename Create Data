@@ -1,7 +1,7 @@
 %Testdatensatz um shertest mit definitv ergebnisbehafteten Daten zu füttern
-function [timedata,posdata,defdata,grenze] = CreateData(datalength,ppms,startfreq,freqinc,endfreq,nuldur,fdur)
+function [timedata,posdata,defdata,grenze] = CreateData(datalength,ppms,freq,nuldur,fdur)
 %freqinc)
-%Position:
+%Position
 %1s linearer anstieg von -8*10^-6 bis -5*10^-6 + 2s nullinie bei -5*10^-6 + 10 0.1s intervalle mit
 %ansteigender Frequenz sinusförmig mit amp 2*10^-8 + 1s linearer abfall von -8*10^-6 auf -5*10^-6
 %Deflection:
@@ -23,15 +23,15 @@ function [timedata,posdata,defdata,grenze] = CreateData(datalength,ppms,startfre
     %Frequenzen   
     d=-4*10^-6;
     a=2*10^-8;
-    freqvec=[startfreq:freqinc:endfreq];
-    kreisfreqvec=freqvec.*2*pi;
+    freq=[startfreq:freqinc:endfreq];
+    kreisfreq=freq.*2*pi;
     %Runden der kreisfrequenz sonst passieren schlimme dinge
-    kreisfreqvec= round(kreisfreqvec*100)/100;
-    numFreq=numel(freqvec);
+    kreisfreq= round(kreisfreq*100)/100;
+    numFreq=numel(freq);
     i=1;
     for i=1:numFreq
-        b=kreisfreqvec(i);
-        posdata3(1+(i-1)*fdur*1000*ppms:i*fdur*1000*ppms)=a*sin(b*(0.0001:0.0001:0.5))+d;   
+        b=kreisfreq(i);
+        posdata3(1+(i-1)*fdur(i)*1000*ppms:i*fdur(i)*1000*ppms)=a*sin(b*(0.0001:0.0001:0.5))+d;   
     end
     restlength=datalength-length(posdata2)-length(posdata3);
     posinterv1=1:round(1/2*restlength);
@@ -58,7 +58,7 @@ defdata2=ones(1,length(posdata2))*2*10^-8;
 a=5*10^-9;
 d=2*10^-8;
 for i=1:numFreq
-        b=kreisfreqvec(i);
+        b=kreisfreq(i);
         defdata3(1+(i-1)*100*ppms:i*100*ppms)=a*sin(b*(0.0001:0.0001:0.5)+i*(1/50*pi))+d;
 end
 
