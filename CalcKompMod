@@ -7,9 +7,9 @@ tic
 try         
     %filenameText='Line0000Point';%Dateiname ohne Index und Erweiterung
     startIdx=0;%Erster Point-Index
-    stopIdx=19; %Letzter Point-Index
+    stopIdx=0; %Letzter Point-Index
     startLineIdx=0;%Erster Line-Index
-    stopLineIdx=19;%Letzter Line-Index
+    stopLineIdx=0;%Letzter Line-Index
     startMapIdx=1;%Erster Map-Index
     stopMapIdx=1;%Letzter Map-Index
     extension='.ibw';           
@@ -73,7 +73,7 @@ try
             initfilenameText=strcat(filenameText,indexStr,'Point');
             path = '';
             path = strcat(direct,'\',MapNameText,'\',foldernameText);
-            cd (path)    
+            %cd (path)    
             %% compute filename
             for currIdx=startIdx:1:stopIdx
 
@@ -625,8 +625,8 @@ try
                     hold on                    
                     plot(time,deflection) 
                     hold off
-                    saveas(b,strcat('Figure',num2str(pointcounter),'def','.jpg'));
-                    close(b)
+                    %saveas(b,strcat('Figure',num2str(pointcounter),'def','.jpg'));
+                    %close(b)
                 %{
                 figure(c)
                     set(c,'Name',filename);
